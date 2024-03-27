@@ -1,0 +1,57 @@
+用于插装的探针probe存在内核k(ernal)和用户u(ser)两个部分，即kprobe, uprobe
+同时每个探针除了上面的插入以外，还有判断插入返回值ret(urn)的动作：kretprobe, uretprobe
+
+在我们希望使用用户探针时，需要指定执行函数的文件和函数名称如：uprobe:/home/name/test/a.out:func_name
+但调用系统函数而非自定义函数时，执行函数的文件其实另有其它，比如想要把探针放到malloc里，就得溯源哪里执行malloc
+
+通过执行 nm a.out | grep "malloc" 查找可执行文件a.out中malloc的执行者，通常放在@之后
+
+比如上面的指令提示 U malloc@GLIBC_2.2.5 即表示malloc由libc这个库来执行，需要把探针插在这个库的malloc里
+当然，我们只知道这个库来自libc，可是到底是哪个libc？在哪里？就只能通过另一个指令查找
+ldd a.out 可以定位a.out使用的库有哪些，这些库的绝对路径等
+
+现在搞定了函数执行者的问题，还有另一个问题：很多地方也在调用这个库的malloc函数，如果都找出来就太多了会影响判断
+因此需要做过滤，使用 / 条件 / 的方式进行筛选，比如我们只想知道a.out中malloc的调用，需要加入如下条件
+/comm == "a.out"/
+
+同时我们可以查找malloc的函数原型，以获取有用的信息：
+void *malloc(size_t size);
+由上可知malloc的参数是申请的内存大小，返回值是申请的内存地址，于是可以使用关键字进行上述信息获取：
+arg0可以表示函数的传入参数，多参数时往后顺延为arg1,arg2...
+retval可以表示函数的返回值
+
+加上关键字comm(表示执行文件名/进程名)后，插入探针的动作可以写成如下的模式：
+uprobe:/lib/x86_64-linux-gnu/lib.so.6:malloc /comm == "a.out"/ {
+	printf("malloc size %d\n",arg0);
+}
+用以获取进程a.out在每次malloc时申请的空间大小
+此时将上述代码写入文件bpf_test.bt，该文件即可作为bpftrace的脚本执行，执行方式如下
+bpftrace bpf_text.bt
+
+此时我们需要两个端口，一个端口用于开启探针，一个端口用于执行文件。
+
+但上面的探针只能探测malloc是否被调用，真正执行成功还是失败还需要uretprobe来获取malloc的返回值进行判断
+uretprobe:/lib/x86_64-linux-gnu/lib.so.6:malloc /comm == "a.out"/ {
+	printf("addr = %p\n", retval);
+}
+
+只是这个文件仍不够好用，如果需要判断内存泄漏，还需要在free侧插入探针，并做一个状态表用于存储信息
+
+为实现上述效果，需指明临时变量$和静态变量@，后面接变量名，可赋值为任意类型;
+状态表可以理解为数组，delete(map_name[position])函数可删除指定的数组成员;
+于是编写为如下代码
+
+uprobe:/lib/x86_64-linux-gnu/lib.so.6:malloc /comm == "a.out"/ {
+	@size = arg0;
+}
+
+uretprobe:/lib/x86_64-linux-gnu/lib.so.6:malloc /comm == "a.out"/ {
+	@mem_map[retval] = @size;
+}
+
+uprobe:/lib/x86_64-linux-gnu/lib.so.6:free /comm == "a.out"/ {
+	delete(@mem_map[arg0]);
+}
+
+上述代码没有过程信息，只会在运行结束时打出状态表，表示没有匹配free的malloc地址及申请空间大小
+其中free插入探针时，使用arg0参数为free的函数原型的参数，即申请空间的地址，正好用于当作状态表唯一的id
