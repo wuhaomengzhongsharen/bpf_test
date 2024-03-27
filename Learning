@@ -1,5 +1,5 @@
-用于插装的探针probe存在内核k(ernal)和用户u(ser)两个部分，即kprobe, uprobe
-同时每个探针除了上面的插入以外，还有判断插入返回值ret(urn)的动作：kretprobe, uretprobe
+用于插装的探针probe存在内核k(ernal)和用户u(ser)两个部分，即kprobe, uprobe，指定进入函数时的行为
+探针除了插入在进入函数时，还可插入在退出ret(urn)函数时：kretprobe, uretprobe，指定退出函数时的行为
 
 在我们希望使用用户探针时，需要指定执行函数的文件和函数名称如：uprobe:/home/name/test/a.out:func_name
 但调用系统函数而非自定义函数时，执行函数的文件其实另有其它，比如想要把探针放到malloc里，就得溯源哪里执行malloc
@@ -55,3 +55,14 @@ uprobe:/lib/x86_64-linux-gnu/lib.so.6:free /comm == "a.out"/ {
 
 上述代码没有过程信息，只会在运行结束时打出状态表，表示没有匹配free的malloc地址及申请空间大小
 其中free插入探针时，使用arg0参数为free的函数原型的参数，即申请空间的地址，正好用于当作状态表唯一的id
+
+需要指出的是，每个bpftrace的脚本文件都有默认的BEGIN函数和END函数，可以使用如下方法在开始和结束时打印
+BEGIN {
+	printf("entry bpf_test\n");
+}
+
+...
+
+END {
+	printf("end bpf_test\n");
+}
