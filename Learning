@@ -69,3 +69,4 @@ END {
 
 对于追踪点来说，我们可以使用args->xxx来访问追踪的函数内成员，如何得知成员有哪些，使用如下指令
 bpftrace -vl tracepoint:xxx:xxx
+同时需要指出的是：系统中所有的跟踪点都定义在/sys/kernel/debug/traceing/events目录中
