@@ -70,3 +70,66 @@ END {
 对于追踪点来说，我们可以使用args->xxx来访问追踪的函数内成员，如何得知成员有哪些，使用如下指令
 bpftrace -vl tracepoint:xxx:xxx
 同时需要指出的是：系统中所有的跟踪点都定义在/sys/kernel/debug/traceing/events目录中
+
+
+根据我的理解来看，之前编写的都是BPFtrace的编写，即编写脚本
+大概是libbpf的方法，以下是编写方式：
+
+首先下载源码，解压到/usr/src/下
+然后安装依赖 sudo apt install libncurses5-dev flex bison libelf-dev binutils-dev libssl-dev
+再分别安装 clang 和 llvm 
+sudo apt install clang
+sudo apt install llvm
+
+在源码下使用命令
+make defconfig
+make headers_install
+
+为确保以上步骤没有问题，执行如下指令
+make M=samples/bpf
+确保在samples/bpf下看到生成的可执行文件
+
+确认无误后可以开始编辑
+
+首先编写hello_kern.c文件
+//---------------------------------------------------------
+#include <linux/bpf.h>
+#include "bpf_helpers.h"
+#define SEC(NAME) __attribute__((section(Name), used))
+
+SEC("trancepoint/syscalls/sys_enter_execve")           //此处为插入探针的点位，每当执行系统调用入口时触发
+int bpf_prog(void *ctx) {
+	char msg[] = "Hello BPF!\n";
+	bpf_trace_printk(msg, sizeof(msg));
+	return 0;
+}
+
+char _license[] SEC("license") = "GPL";
+//---------------------------------------------------------
+然后编写hello_user.c文件
+//---------------------------------------------------------
+#include <stdio.h>
+#include "bpf_load.h"
+
+int main(int argc, char **argv) {
+	if(load_bpf_file("hello_kern.o") != 0) {
+		printf("The kernel didn't load BPF program\n");
+		return -1;
+	}
+	
+	read_trace_pipe();
+	return 0;
+}
+//---------------------------------------------------------
+
+自己的文件编写完成后，需要修改内核源码的Makefile文件：
+在将要build的目标里加入自己的工程
+hostprogs-y += hello                  //构建清单
+hello-objs := bpf_load.o hello_user.o //-objs用于将所有编译文件合并
+always += hello_kern.o
+
+同样，再次执行make M=samples/bpf
+于samples/bpf中寻找自己的bpf程序生成的可执行文件（即hostprogs-y添加的工程名）
+
+执行该工程，测试bpf程序的功能
+sudo ./hello
